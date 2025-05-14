@@ -1,0 +1,110 @@
+# process/encoder.py
+import numpy as np
+from PIL import Image
+from process.mapping import binary_to_base
+
+def split_channels(arr):
+    if arr.ndim == 2:
+        return [arr]
+    return [arr[:,:,i] for i in range(arr.shape[2])]
+
+def bitplanes_from_channel(chan):
+    return [(chan>>i)&1 for i in range(8)]
+
+def combine_planes(low, high):
+    flat = ((high<<1)|low).flatten()
+    return [binary_to_base[format(v,'02b')] for v in flat]
+
+def partition(seq, length):
+    return [''.join(seq[i:i+length]) for i in range(0, len(seq), length)]
+
+def encode_and_partition(path):
+    img = Image.open(path)
+    arr = np.array(img)
+    chans = split_channels(arr)
+    h, w = chans[0].shape
+    pairs = [(0,7),(1,6),(2,5),(3,4)]
+    lengths = [128,64,32,8]
+    subseq = {}
+    for c, chan in enumerate(chans):
+        planes = bitplanes_from_channel(chan)
+        for i,(l,hp) in enumerate(pairs):
+            seq = combine_planes(planes[l], planes[hp])
+            key = f"C{c}_P{i+1}"
+            subseq[key] = partition(seq, lengths[i])
+    mode = img.mode
+    return subseq, (h, w, len(chans)), mode
+
+# # process/encoder.py
+# import numpy as np
+# from PIL import Image
+# from process.mapping import binary_to_base, base_to_binary
+
+# def split_channels(arr):
+#     if arr.ndim == 2:
+#         return [arr]
+#     return [arr[:,:,i] for i in range(arr.shape[2])]
+
+# def bitplanes_from_channel(chan):
+#     return [(chan>>i)&1 for i in range(8)]
+
+# def combine_planes(low, high):
+#     flat = ((high<<1)|low).flatten()
+#     return [binary_to_base[format(v,'02b')] for v in flat]
+
+# def partition(seq, length):
+#     return [''.join(seq[i:i+length]) for i in range(0, len(seq), length)]
+
+# def logistic_sequence(x0, r, L, burn=100):
+#     for _ in range(burn):
+#         x0 = r * x0 * (1 - x0)
+#     xs = []
+#     x = x0
+#     for _ in range(L):
+#         x = r * x * (1 - x)
+#         xs.append(x)
+#     return xs
+
+# def encode_and_partition(path, seeds):
+#     img = Image.open(path)
+#     arr = np.array(img)
+#     chans = split_channels(arr)
+#     h, w = chans[0].shape
+#     pairs = [(0,7),(1,6),(2,5),(3,4)]
+#     lengths = [128,64,32,8]
+#     subseq = {}
+#     for c, chan in enumerate(chans):
+#         planes = bitplanes_from_channel(chan)
+#         for i, (l, hp) in enumerate(pairs):
+#             seq = combine_planes(planes[l], planes[hp])
+#             key = f"C{c}_P{i+1}"
+#             parts = partition(seq, lengths[i])
+#             L = len(parts)
+#             xs = logistic_sequence(seeds[i], 3.99, L)
+#             for j in range(L):
+#                 k = int(xs[j] * L)
+#                 parts[j], parts[k] = parts[k], parts[j]
+#             subseq[key] = parts
+#     mode = img.mode
+#     return subseq, (h, w, len(chans)), mode
+
+
+# def reconstruct_encrypted_image(subseq, img_info):
+#     h, w, chs = img_info
+#     total = h * w
+#     channels = []
+#     for c in range(chs):
+#         combined_seq = ''.join(''.join(subseq[f"C{c}_P{i+1}"]) for i in range(4))
+#         bases = list(combined_seq)
+#         pix = np.zeros(total, dtype=np.uint8)
+#         for idx in range(min(len(bases), total)):
+#             base = bases[idx]
+#             if base in base_to_binary:
+#                 b0, b1 = base_to_binary[base]
+#                 pix[idx] = int(b0 + b1, 2)
+#             else:
+#                 pix[idx] = 0
+#         channels.append(pix.reshape((h, w)))
+#     if chs == 1:
+#         return Image.fromarray(channels[0])
+#     return Image.fromarray(np.stack(channels, axis=2))
