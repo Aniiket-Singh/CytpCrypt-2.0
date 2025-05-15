@@ -49,7 +49,6 @@ def encode_and_partition(path, seeds):
             subseq[f"C{c}_P{i+1}"] = parts
     return subseq, (h, w, len(channels)), img.mode
 
-
 def reconstruct_encrypted_image(subseq, img_info):
     from process.mapping import base_to_binary
     import numpy as np
@@ -63,9 +62,8 @@ def reconstruct_encrypted_image(subseq, img_info):
             if not key.startswith(f"C{c}_"): continue
             low, high = mapping[key.split('_')[1]]
             bases = ''.join(parts)
-            limit = min(len(bases), total)
-            for idx in range(limit):
-                b0, b1 = base_to_binary.get(bases[idx], '00')
+            for idx, base in enumerate(bases[:total]):
+                b0, b1 = base_to_binary.get(base, '00')
                 planes[low][idx] = int(b1)
                 planes[high][idx] = int(b0)
         pix = np.zeros(total, dtype=np.uint8)
@@ -76,15 +74,3 @@ def reconstruct_encrypted_image(subseq, img_info):
         else:
             encrypted[:, :, c] = pix.reshape((h, w))
     return encrypted
-
-
-def shuffle_channels(arr, seed):
-    # arr: HxWxC numpy array
-    h, w, chs = arr.shape
-    flat = arr.reshape(-1, chs)
-    xs = logistic_sequence(seed, 3.99, flat.shape[0])
-    for i, x in enumerate(xs):
-        # cyclic rotate channels by offset k
-        k = int(x * chs)
-        flat[i] = np.roll(flat[i], k)
-    return flat.reshape((h, w, chs))
