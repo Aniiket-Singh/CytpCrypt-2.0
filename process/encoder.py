@@ -4,7 +4,8 @@ from PIL import Image
 from process.mapping import binary_to_base
 
 def logistic_sequence(x0, r, L, burn=100):
-    for _ in range(burn): x0 = r * x0 * (1 - x0)
+    for _ in range(burn):
+        x0 = r * x0 * (1 - x0)
     seq = []
     x = x0
     for _ in range(L):
@@ -13,7 +14,7 @@ def logistic_sequence(x0, r, L, burn=100):
     return seq
 
 def split_channels(arr):
-    return [arr] if arr.ndim == 2 else [arr[:,:,i] for i in range(arr.shape[2])]
+    return [arr] if arr.ndim == 2 else [arr[:, :, i] for i in range(arr.shape[2])]
 
 def bitplanes(chan):
     return [(chan >> i) & 1 for i in range(8)]
@@ -22,7 +23,7 @@ def combine_planes(low, high):
     flat = ((high << 1) | low).flatten()
     return [binary_to_base[format(v, '02b')] for v in flat]
 
-def partition(seq, length=2):
+def partition(seq, length=4):
     return [''.join(seq[i:i+length]) for i in range(0, len(seq), length)]
 
 def intra_plane_transform(parts, seed):
@@ -43,32 +44,47 @@ def encode_and_partition(path, seeds):
         planes = bitplanes(chan)
         for i, (l, hp) in enumerate(pairs):
             seq = combine_planes(planes[l], planes[hp])
-            parts = partition(seq, 2)
+            parts = partition(seq, 4)
             parts = intra_plane_transform(parts, seeds[i])
             subseq[f"C{c}_P{i+1}"] = parts
     return subseq, (h, w, len(channels)), img.mode
+
 
 def reconstruct_encrypted_image(subseq, img_info):
     from process.mapping import base_to_binary
     import numpy as np
     h, w, chs = img_info
     total = h * w
-    encrypted = np.zeros((h, w, chs), dtype=np.uint8) if chs>1 else np.zeros((h, w), dtype=np.uint8)
-    mapping = {'P1':(0,7), 'P2':(1,6), 'P3':(2,5), 'P4':(3,4)}
+    encrypted = np.zeros((h, w, chs), dtype=np.uint8) if chs > 1 else np.zeros((h, w), dtype=np.uint8)
+    mapping = {'P1': (0,7), 'P2': (1,6), 'P3': (2,5), 'P4': (3,4)}
     for c in range(chs):
         planes = {i: np.zeros(total, dtype=np.uint8) for i in range(8)}
         for key, parts in subseq.items():
             if not key.startswith(f"C{c}_"): continue
             low, high = mapping[key.split('_')[1]]
             bases = ''.join(parts)
-            for idx, base in enumerate(bases[:total]):
-                b0, b1 = base_to_binary.get(base, '00')
+            limit = min(len(bases), total)
+            for idx in range(limit):
+                b0, b1 = base_to_binary.get(bases[idx], '00')
                 planes[low][idx] = int(b1)
                 planes[high][idx] = int(b0)
         pix = np.zeros(total, dtype=np.uint8)
-        for i in range(8): pix |= (planes[i] << i)
-        if chs==1:
-            encrypted = pix.reshape((h,w))
+        for i in range(8):
+            pix |= (planes[i] << i)
+        if chs == 1:
+            encrypted = pix.reshape((h, w))
         else:
-            encrypted[:,:,c] = pix.reshape((h,w))
+            encrypted[:, :, c] = pix.reshape((h, w))
     return encrypted
+
+
+def shuffle_channels(arr, seed):
+    # arr: HxWxC numpy array
+    h, w, chs = arr.shape
+    flat = arr.reshape(-1, chs)
+    xs = logistic_sequence(seed, 3.99, flat.shape[0])
+    for i, x in enumerate(xs):
+        # cyclic rotate channels by offset k
+        k = int(x * chs)
+        flat[i] = np.roll(flat[i], k)
+    return flat.reshape((h, w, chs))
